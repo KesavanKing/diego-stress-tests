@@ -8,9 +8,11 @@ import (
 
 	"golang.org/x/net/context"
 
+	"diego-stress-tests/cedar/config"
+
+	"diego-stress-tests/cedar/cli"
+
 	"code.cloudfoundry.org/cflager"
-	"code.cloudfoundry.org/diego-stress-tests/cedar/cli"
-	"code.cloudfoundry.org/diego-stress-tests/cedar/config"
 	"code.cloudfoundry.org/lager"
 )
 
@@ -22,36 +24,40 @@ type State struct {
 }
 
 type AppStateMetrics struct {
-	AppName    *string `json:"app_name"`
-	AppGuid    *string `json:"app_guid"`
-	AppURL     string  `json:"app_url"`
-	PushState  *State  `json:"push"`
-	StartState *State  `json:"start"`
+	AppName      *string `json:"app_name"`
+	AppGuid      *string `json:"app_guid"`
+	AppURL       string  `json:"app_url"`
+	PushState    *State  `json:"push"`
+	StartState   *State  `json:"start"`
+	RestartState *State  `json:"start"`
 }
 
 const (
-	Push  = "push"
-	Start = "start"
+	Push    = "push"
+	Start   = "start"
+	Restart = "restart"
 )
 
 type Deployer struct {
 	errChan chan error
 	config  config.Config
 
-	AppsToPush  []CfApp
-	AppsToStart []CfApp
-	AppStates   map[string]*AppStateMetrics
+	AppsToPush    []CfApp
+	AppsToStart   []CfApp
+	AppsToRestart []CfApp
+	AppStates     map[string]*AppStateMetrics
 
 	client cli.CFClient
 }
 
 func NewDeployer(config config.Config, apps []CfApp, cli cli.CFClient) Deployer {
 	p := Deployer{
-		errChan:    make(chan error, config.MaxAllowedFailures()),
-		AppStates:  make(map[string]*AppStateMetrics),
-		config:     config,
-		AppsToPush: apps,
-		client:     cli,
+		errChan:     make(chan error, config.MaxAllowedFailures()),
+		AppStates:   make(map[string]*AppStateMetrics),
+		config:      config,
+		AppsToPush:  apps,
+		AppsToStart: apps,
+		client:      cli,
 	}
 	return p
 }
@@ -193,6 +199,77 @@ func (p *Deployer) StartApps(ctx context.Context, cancel context.CancelFunc) {
 	wg.Wait()
 }
 
+func (p *Deployer) RestartApps(logger lager.Logger, ctx context.Context, cancel context.CancelFunc) {
+	logger = logger.Session("Restarting-apps", lager.Data{"max-allowed-failures": p.config.MaxAllowedFailures()})
+	logger.Info("started")
+	defer logger.Info("complete")
+
+	stateMutex := &sync.Mutex{}
+	wg := &sync.WaitGroup{}
+	rateLimiter := make(chan struct{}, p.config.MaxInFlight())
+
+	app := p.AppsToPush[0]
+	err := p.restartApp(logger, ctx, app, stateMutex)
+	if err != nil {
+		logger.Error("failed-to-restart-initial-app", err)
+		cancel()
+		return
+	}
+
+	for _, app := range p.AppsToPush[1:] {
+		app := app
+		wg.Add(1)
+		go func() {
+			rateLimiter <- struct{}{}
+			defer func() {
+				<-rateLimiter
+				wg.Done()
+			}()
+
+			select {
+			case <-ctx.Done():
+				logger.Info("restart-cancelled", lager.Data{"app-name": app.AppName()})
+				return
+			default:
+			}
+
+			err := p.restartApp(logger, ctx, app, stateMutex)
+			if err != nil {
+				logger.Error("failed-restarting-app", err)
+				select {
+				case p.errChan <- err:
+				default:
+					logger.Error("exceeded-failure-tolerance", nil)
+					cancel()
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	logger.Info("done-restarting-apps")
+}
+
+func (p *Deployer) restartApp(logger lager.Logger, ctx context.Context, app CfApp, stateMutex *sync.Mutex) error {
+	startTime := time.Now()
+	restartErr := app.Restart(logger, ctx, p.client, p.config.SkipVerifyCertificate(), p.config.Timeout())
+	endTime := time.Now()
+
+	succeeded := restartErr == nil
+	name := app.AppName()
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
+
+	p.AppStates[name] = &AppStateMetrics{
+		AppName:      &name,
+		AppURL:       app.AppURL(),
+		RestartState: &State{},
+	}
+	p.updateReport(Restart, name, succeeded, startTime, endTime)
+
+	return restartErr
+}
+
 type CedarReport struct {
 	Succeeded bool              `json:"succeeded"`
 	Apps      []AppStateMetrics `json:"apps"`
@@ -242,6 +319,8 @@ func (p *Deployer) updateReport(reportType, name string, succeeded bool, startTi
 		report = p.AppStates[name].PushState
 	case Start:
 		report = p.AppStates[name].StartState
+	case Restart:
+		report = p.AppStates[name].RestartState
 	}
 	start := startTime.Format("2006-01-02T15:04:05.000-0700")
 	end := endTime.Format("2006-01-02T15:04:05.000-0700")

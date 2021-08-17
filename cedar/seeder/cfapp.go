@@ -28,6 +28,7 @@ type CfApp interface {
 	AppURL() string
 	Push(logger lager.Logger, ctx context.Context, client cli.CFClient, payload string, timeout time.Duration) error
 	Start(logger lager.Logger, ctx context.Context, client cli.CFClient, skipVerifyCertificate bool, timeout time.Duration) error
+	Restart(logger lager.Logger, ctx context.Context, client cli.CFClient, skipVerifyCertificate bool, timeout time.Duration) error
 	Guid(logger lager.Logger, ctx context.Context, client cli.CFClient, timeout time.Duration) (string, error)
 }
 
@@ -109,6 +110,23 @@ func (a *CfApplication) Start(logger lager.Logger, ctx context.Context, cli cli.
 	}
 	logger.Info("completed")
 	logger.Debug("successful-response-starting", lager.Data{"response": response})
+	return nil
+}
+
+func (a *CfApplication) Restart(logger lager.Logger, ctx context.Context, cli cli.CFClient, skipVerifyCertificate bool, timeout time.Duration) error {
+	logger = logger.Session("restart", lager.Data{"app": a.appName})
+	_, err := cli.Cf(logger, ctx, timeout, "restart", a.appName)
+	if err != nil {
+		logger.Error("failed-to-restart", err)
+		return err
+	}
+	response, err := a.curl(ctx, skipVerifyCertificate)
+	if err != nil {
+		logger.Error("failed-curling-app", err)
+		return err
+	}
+	logger.Info("completed")
+	logger.Debug("successful-response-restarting", lager.Data{"response": response})
 	return nil
 }
 

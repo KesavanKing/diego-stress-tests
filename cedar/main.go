@@ -6,10 +6,13 @@ import (
 
 	"golang.org/x/net/context"
 
+	"diego-stress-tests/cedar/config"
+
+	"diego-stress-tests/cedar/seeder"
+
+	"diego-stress-tests/cedar/cli"
+
 	"code.cloudfoundry.org/cflager"
-	"code.cloudfoundry.org/diego-stress-tests/cedar/cli"
-	"code.cloudfoundry.org/diego-stress-tests/cedar/config"
-	"code.cloudfoundry.org/diego-stress-tests/cedar/seeder"
 	"code.cloudfoundry.org/lager"
 )
 
@@ -26,6 +29,7 @@ var (
 	appPayload            = flag.String("payload", "assets/temp-app", "directory containing the stress-app payload to push")
 	prefix                = flag.String("prefix", "cedarapp", "the naming prefix for cedar generated apps")
 	timeout               = flag.Duration("timeout", 30*time.Second, "time allowed for a push or start operation, golang duration")
+	strategy              = flag.String("strategy", "push-start", "CF Strategy options push-start or restart")
 )
 
 func main() {
@@ -62,6 +66,7 @@ func main() {
 		*timeout,
 		*useTLS,
 		*skipVerifyCertificate,
+		*strategy,
 	)
 
 	if err != nil {
@@ -71,8 +76,17 @@ func main() {
 
 	apps := generateApps(logger, config)
 	deployer := seeder.NewDeployer(config, apps, cfClient)
-	deployer.PushApps(logger, ctx, cancel)
-	deployer.StartApps(ctx, cancel)
+	if config.Strategy() == "push-start" {
+		logger.Info("Strategy: Push and Starting Apps")
+		//deployer.PushApps(logger, ctx, cancel)
+		//deployer.StartApps(ctx, cancel)
+	}
+
+	if config.Strategy() == "restart" {
+		logger.Info("Strategy: Restarting Apps")
+		deployer.RestartApps(logger, ctx, cancel)
+	}
+
 	if succeeded := deployer.GenerateReport(ctx, cancel); !succeeded {
 		panic("seeding failed")
 	}

@@ -6,7 +6,8 @@ import (
 	"os"
 	"time"
 
-	"code.cloudfoundry.org/diego-stress-tests/cedar/cli"
+	"diego-stress-tests/cedar/cli"
+
 	"code.cloudfoundry.org/lager"
 )
 
@@ -32,6 +33,7 @@ type Config interface {
 	Timeout() time.Duration
 	TotalAppCount() int
 	MaxAllowedFailures() int
+	Strategy() string
 	AppTypes() []AppDefinition
 }
 
@@ -44,6 +46,7 @@ type config struct {
 	useTLS                bool
 	skipVerifyCertificate bool
 	appPayload            string
+	strategy              string
 	prefix                string
 	configFile            string
 	outputFile            string
@@ -59,7 +62,7 @@ func NewConfig(
 	tolerance float64,
 	appPayload, prefix, domain, configFile, outputFile string,
 	timeout time.Duration,
-	useTLS, skipVerifyCertificate bool,
+	useTLS, skipVerifyCertificate bool, strategy string,
 ) (Config, error) {
 	c := &config{
 		numBatches:            numBatches,
@@ -74,6 +77,7 @@ func NewConfig(
 		configFile:            configFile,
 		outputFile:            outputFile,
 		timeout:               timeout,
+		strategy:              strategy,
 	}
 	err := c.init(logger, cfClient)
 	if err != nil {
@@ -137,6 +141,10 @@ func (c *config) OutputFile() string {
 
 func (c *config) AppPayload() string {
 	return c.appPayload
+}
+
+func (c *config) Strategy() string {
+	return c.strategy
 }
 
 func (c *config) init(logger lager.Logger, cfClient cli.CFClient) error {

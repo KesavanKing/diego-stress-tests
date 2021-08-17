@@ -3,7 +3,8 @@ package seeder
 import (
 	"fmt"
 
-	"code.cloudfoundry.org/diego-stress-tests/cedar/config"
+	"diego-stress-tests/cedar/config"
+
 	"code.cloudfoundry.org/lager"
 )
 

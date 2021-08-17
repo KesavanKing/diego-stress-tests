@@ -3,8 +3,9 @@ package config_test
 import (
 	"time"
 
+	. "diego-stress-tests/cedar/config"
+
 	"code.cloudfoundry.org/diego-stress-tests/cedar/cli/fakes"
-	. "code.cloudfoundry.org/diego-stress-tests/cedar/config"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -14,7 +15,6 @@ var _ = Describe("Cedar", func() {
 	// sample config json file, read and verify, calculating timeout
 	var (
 		config                                             Config
-		err                                                error
 		cfClient                                           *fakes.FakeCFClient
 		numBatches, maxInFlight, maxPollingErrors          int
 		tolerance                                          float64
@@ -22,6 +22,7 @@ var _ = Describe("Cedar", func() {
 		timeout                                            time.Duration
 		useTLS                                             bool
 		skipVerifyCertificate                              bool
+		strategy                                           string
 	)
 
 	BeforeEach(func() {
@@ -38,10 +39,11 @@ var _ = Describe("Cedar", func() {
 		outputFile = "tmp/output.json"
 		timeout = 30 * time.Second
 		cfClient = &fakes.FakeCFClient{}
+		strategy = "push-start"
 	})
 
 	JustBeforeEach(func() {
-		config, err = NewConfig(
+		config, _ = NewConfig(
 			fakeLogger,
 			cfClient,
 			numBatches, maxInFlight, maxPollingErrors,
@@ -49,7 +51,7 @@ var _ = Describe("Cedar", func() {
 			appPayload, prefix, domain, configFile, outputFile,
 			timeout,
 			useTLS,
-			skipVerifyCertificate,
+			skipVerifyCertificate, strategy,
 		)
 	})
 
